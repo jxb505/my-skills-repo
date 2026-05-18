@@ -1,11 +1,11 @@
 ---
 name: safety-violation-report
-description: 从上传的 Excel 导出数据生成深度的中文安全生产违章分析与改进建议报告。当用户提供安全违章数据表，并要求生成书面报告、Word 文档、趋势分析、违章类别分析、协力/人员分析、管理短板、根因诊断，或趋势线、占比/饼图、Top-N 柱状图、热力图等图表时使用此技能。该技能会清洗原始 Excel 导出数据，剔除已删除行，分析违章级别、扣分、部门、人员性质、数据来源、违章主题及重复性问题，并生成包含嵌入图表和可执行整改建议的 DOCX 报告。
+description: 从上传的 Excel 导出数据生成深度的中文安全生产违章分析与改进建议报告。当用户提供安全违章数据表，并要求生成书面报告、Markdown 文档、趋势分析、违章类别分析、协力/人员分析、管理短板、根因诊断，或趋势线、占比/饼图、Top-N 柱状图、热力图等图表时使用此技能。该技能会清洗原始 Excel 导出数据，剔除已删除行，分析违章级别、扣分、部门、人员性质、数据来源、违章主题及重复性问题，并生成包含图表引用和可执行整改建议的 Markdown 报告。
 ---
 
 # 安全违章报告工作流
 
-使用此技能将上传的安全生产违章 Excel 导出数据转换为一份精美的、包含嵌入图表和管理建议的中文 Word 报告。
+使用此技能将上传的安全生产违章 Excel 导出数据转换为一份包含图表引用和管理建议的中文 Markdown 报告。
 
 ## 所需输入
 - 一份包含安全违章记录的 Excel 工作簿 (`.xlsx` 或 `.xls`)。
@@ -13,10 +13,10 @@ description: 从上传的 Excel 导出数据生成深度的中文安全生产违
 - 如果工作簿在数据表上方包含标题行，请自动检测实际的表头行，而不是默认使用第 1 行。
 
 ## 默认输出
-- 一份中文 `.docx` 报告。
+- 一份中文 `.md` 报告。
 - 包含描述性分析和嵌入的图表。
 - 使用管理咨询的语气：客观、直接、数据驱动、并具有行动导向。
-- 为输出文件清晰命名，例如 `安全生产违章情况深度分析与改进建议报告.docx`。
+- 为输出文件清晰命名，例如 `安全生产违章情况深度分析与改进建议报告.md`。
 
 ## 智能分析工作流 (Agentic Workflow)
 当你判断用户意图是生成安全违章报告时，必须严格遵循以下**三步走**流程：
@@ -56,12 +56,12 @@ python scripts/generate_safety_report.py /path/to/input.xlsx --export-stats
 ```
 
 ### 第三步：组装最终报告 (Report Assembly)
-将包含动态分析的 JSON 文件路径作为 `--dynamic-file` 传递给生成脚本，生成最终排版的 Word 报告：
+将包含动态分析的 JSON 文件路径作为 `--dynamic-file` 传递给生成脚本，生成最终 Markdown 报告：
 ```bash
-python scripts/generate_safety_report.py /path/to/input.xlsx --output /path/to/output.docx --title "安全生产违章情况深度分析与改进建议报告" --dynamic-file dynamic_analysis.json
+python scripts/generate_safety_report.py /path/to/input.xlsx --output /path/to/output.md --title "安全生产违章情况深度分析与改进建议报告" --dynamic-file dynamic_analysis.json
 ```
 
-该脚本将自动清洗数据、画图并注入你撰写的动态分析，最终生成一份包含结论、根因诊断和改进建议行动清单的完整 Word 报告。
+该脚本将自动清洗数据、画图并注入你撰写的动态分析，最终生成一份包含结论、根因诊断和改进建议行动清单的完整 Markdown 报告。
 
 ## 报告结构
 除非用户提供了其他模板，否则请遵循以下结构：
@@ -93,7 +93,7 @@ python scripts/generate_safety_report.py /path/to/input.xlsx --output /path/to/o
 - 不要仅仅罗列统计数据；必须解释其管理含义和风险隐患。
 - 将 A类/高分/重复违章/协力集中/视频发现占比高 视为高优先级的风险信号。
 - 如果图表无法正常渲染中文字符，请设置兼容中文的 matplotlib 字体（如果环境支持）。
-- 如果用户上传了现有的 DOCX 作为样式示例，请将其作为样式/内容参考，除非用户明确要求，否则不要将其视作权威数据。
+- 如果用户上传了现有的 DOCX 作为样式示例，请将其作为内容参考，除非用户明确要求，否则不要将其视作权威数据。
 - 遇到缺失的字段时，请使用现有字段继续分析，并简要说明数据的局限性。
 - 确保所有图表标题和标签使用中文。
 
@@ -104,9 +104,9 @@ python scripts/generate_safety_report.py /path/to/input.xlsx --output /path/to/o
 - 公司/工厂名称；
 - 是否包含或剔除已删除的行；
 - 若 Excel 中信息足够，是否包含连带记分责任分析；
-- 是否使用提供的 DOCX 模板。
+- 是否使用提供的样式参考文件。
 
 ## 支持与参考资源
 - `scripts/generate_safety_report.py`: 默认的确定性报告生成器脚本。
 - `references/analysis_framework.md`: 扩展的分析框架及推荐图表清单。
-- `assets/report-style-reference.docx`: （如果有）示例报告样式/内容参考文件。
+- `assets/report-style-reference.docx`: （如果有）示例报告内容参考文件。

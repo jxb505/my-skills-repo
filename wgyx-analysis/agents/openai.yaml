@@ -1,5 +1,5 @@
 interface:
   display_name: 安全违章分析报告
-  short_description: 从安全生产违章 Excel 生成带图表的深度分析和整改建议 Word 报告。
+  short_description: 从安全生产违章 Excel 生成带图表引用的深度分析和整改建议 Markdown 报告。
   icon: 📊
   primary_color: '#1f6feb'
