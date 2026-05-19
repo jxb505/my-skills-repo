@@ -12,6 +12,19 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import pandas as pd
 
+# 用于生成 Word 报告
+import docx
+from docx import Document
+from docx.shared import Inches, Pt, RGBColor
+from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.enum.table import WD_TABLE_ALIGNMENT
+from docx.oxml import OxmlElement
+from docx.oxml.ns import qn
+
+# 用于生成 PDF 报告
+from fpdf import FPDF
+
+
 STATUS_COL = "状态"
 AREA_COL = "违章区域"
 INSPECT_ORG_COL = "检查机构"
@@ -197,6 +210,382 @@ def export_stats(excel_path: Path) -> None:
     print(json.dumps(stats, ensure_ascii=False, indent=2))
 
 
+def set_run_font(run, font_name="微软雅黑", size_pt=10.5, color_rgb=None, bold=False):
+    run.font.name = font_name
+    rPr = run._element.get_or_add_rPr()
+    rFonts = OxmlElement('w:rFonts')
+    rFonts.set(qn('w:eastAsia'), font_name)
+    rPr.append(rFonts)
+    if size_pt is not None:
+        run.font.size = Pt(size_pt)
+    if color_rgb is not None:
+        run.font.color.rgb = color_rgb
+    run.bold = bold
+
+
+def set_cell_margins(cell, top=100, bottom=100, left=150, right=150):
+    tcPr = cell._element.get_or_add_tcPr()
+    tcMar = OxmlElement('w:tcMar')
+    for m, val in [('w:top', top), ('w:bottom', bottom), ('w:left', left), ('w:right', right)]:
+        node = OxmlElement(m)
+        node.set(qn('w:w'), str(val))
+        node.set(qn('w:type'), 'dxa')
+        tcMar.append(node)
+    tcPr.append(tcMar)
+
+
+def add_docx_table(doc, headers, data, col_widths=None):
+    table = doc.add_table(rows=1, cols=len(headers))
+    table.style = 'Table Grid'
+    table.alignment = WD_TABLE_ALIGNMENT.CENTER
+    
+    hdr_cells = table.rows[0].cells
+    for i, title in enumerate(headers):
+        hdr_cells[i].text = title
+        set_cell_margins(hdr_cells[i], top=120, bottom=120)
+        for paragraph in hdr_cells[i].paragraphs:
+            paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            for run in paragraph.runs:
+                set_run_font(run, font_name="微软雅黑", size_pt=10, bold=True, color_rgb=RGBColor(27, 54, 93))
+                
+    for row_data in data:
+        row_cells = table.add_row().cells
+        for i, val in enumerate(row_data):
+            row_cells[i].text = str(val)
+            set_cell_margins(row_cells[i], top=100, bottom=100)
+            for paragraph in row_cells[i].paragraphs:
+                if i == 0:
+                    paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
+                else:
+                    paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                for run in paragraph.runs:
+                    set_run_font(run, font_name="微软雅黑", size_pt=9.5)
+                    
+    if col_widths:
+        for i, w in enumerate(col_widths):
+            for row in table.rows:
+                row.cells[i].width = Inches(w)
+                
+    doc.add_paragraph().paragraph_format.space_after = Pt(6)
+
+
+def build_docx(docx_path: Path, title: str, period: str, total: int, score_total: float, a_count: int, high_ratio: float, 
+               level_counts: pd.Series, topic_counts: pd.Series, area_counts: pd.Series, person_counts: pd.Series, source_counts: pd.Series,
+               root_causes: list[str], actions: list[dict], 
+               trend_path: Path, level_path: Path, topic_path: Path, area_path: Path, person_path: Path, source_path: Path) -> None:
+    doc = Document()
+    
+    for section in doc.sections:
+        section.top_margin = Inches(1)
+        section.bottom_margin = Inches(1)
+        section.left_margin = Inches(1)
+        section.right_margin = Inches(1)
+        
+    p_title = doc.add_paragraph()
+    p_title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    p_title.paragraph_format.space_before = Pt(24)
+    p_title.paragraph_format.space_after = Pt(12)
+    run_title = p_title.add_run(title)
+    set_run_font(run_title, font_name="微软雅黑", size_pt=20, bold=True, color_rgb=RGBColor(27, 54, 93))
+    
+    p_meta = doc.add_paragraph()
+    p_meta.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    p_meta.paragraph_format.space_after = Pt(24)
+    meta_text = (
+        f"报告日期：{pd.Timestamp.today().strftime('%Y年%m月%d日')}   |   "
+        f"数据周期：{period}\n"
+        f"数据口径：共 {total} 条有效违章记录，剔除“已删除”记录；"
+        f"累计扣分约 {score_total:.0f} 分，A类/重大违章 {a_count} 起（占比 {high_ratio:.1f}%）。"
+    )
+    run_meta = p_meta.add_run(meta_text)
+    set_run_font(run_meta, font_name="微软雅黑", size_pt=10, color_rgb=RGBColor(120, 120, 120))
+    
+    def add_heading_1(text):
+        p = doc.add_paragraph()
+        p.paragraph_format.space_before = Pt(18)
+        p.paragraph_format.space_after = Pt(8)
+        p.paragraph_format.keep_with_next = True
+        run = p.add_run(text)
+        set_run_font(run, font_name="微软雅黑", size_pt=14, bold=True, color_rgb=RGBColor(27, 54, 93))
+        
+    def add_heading_2(text):
+        p = doc.add_paragraph()
+        p.paragraph_format.space_before = Pt(12)
+        p.paragraph_format.space_after = Pt(6)
+        p.paragraph_format.keep_with_next = True
+        run = p.add_run(text)
+        set_run_font(run, font_name="微软雅黑", size_pt=12, bold=True, color_rgb=RGBColor(27, 54, 93))
+
+    def add_paragraph(text, space_after=6):
+        p = doc.add_paragraph()
+        p.paragraph_format.space_after = Pt(space_after)
+        p.paragraph_format.line_spacing = 1.25
+        p.paragraph_format.first_line_indent = Inches(0.3)
+        run = p.add_run(text)
+        set_run_font(run, font_name="微软雅黑", size_pt=10.5)
+        
+    def add_image(img_path, width_in=5.0):
+        if img_path and img_path.exists():
+            p = doc.add_paragraph()
+            p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            p.paragraph_format.space_before = Pt(6)
+            p.paragraph_format.space_after = Pt(12)
+            run = p.add_run()
+            run.add_picture(str(img_path), width=Inches(width_in))
+            
+    add_heading_1("一、总体概况与核心判断")
+    p_desc = (
+        f"本次分析共识别 {total} 条有效违章记录，累计记分约 {score_total:.0f} 分。A类或重大违章约 {a_count} 起，"
+        f"占比 {high_ratio:.1f}%。数据表明，安全风险不是单点偶发，而是在人员行为、现场执行、协力单位管理和作业许可链条中呈现重复发生特征。"
+    )
+    add_paragraph(p_desc)
+    
+    if len(level_counts):
+        p_sub = f"从级别结构看，{level_counts.index[0]} 数量最高；从专题归类看，{topic_counts.index[0] if len(topic_counts) else '未知'} 是最突出的高频问题。建议把高频且高后果的专题纳入厂级专项治理。"
+        add_paragraph(p_sub)
+        
+    add_image(trend_path, width_in=5.5)
+    add_image(level_path, width_in=4.5)
+    
+    level_total = float(level_counts.sum()) or 1.0
+    level_data = []
+    for idx, val in level_counts.items():
+        level_data.append([idx, int(val), f"{val / level_total * 100:.1f}%"])
+    add_docx_table(doc, ["违章级别", "数量", "占比"], level_data, col_widths=[2.5, 1.5, 1.5])
+    
+    add_heading_1("二、高频违章与重点区域画像")
+    p_topic_desc = (
+        f"TOP 专题显示，{topic_counts.index[0] if len(topic_counts) > 0 else '无'}、"
+        f"{topic_counts.index[1] if len(topic_counts) > 1 else '其他'} 等问题重复出现，通常对应制度执行弱化、"
+        f"班组日常纠偏不足和现场监督穿透力不足。"
+    )
+    add_paragraph(p_topic_desc)
+    
+    add_image(topic_path, width_in=5.5)
+    add_image(area_path, width_in=5.5)
+    
+    add_heading_2("高频违章专题 TOP10")
+    topic_total = float(topic_counts.sum()) or 1.0
+    topic_data = []
+    for idx, val in topic_counts.head(10).items():
+        topic_data.append([idx, int(val), f"{val / topic_total * 100:.1f}%"])
+    add_docx_table(doc, ["违章专题", "数量", "占比"], topic_data, col_widths=[3.0, 1.25, 1.25])
+    
+    add_heading_2("重点区域/组织 TOP10")
+    area_total = float(area_counts.sum()) or 1.0
+    area_data = []
+    for idx, val in area_counts.head(10).items():
+        area_data.append([idx, int(val), f"{val / area_total * 100:.1f}%"])
+    add_docx_table(doc, ["区域/组织", "数量", "占比"], area_data, col_widths=[3.0, 1.25, 1.25])
+    
+    add_heading_1("三、人员性质、协力单位与数据来源分析")
+    if not person_counts.empty:
+        p_pers = f"人员性质分布显示，{person_counts.index[0]} 违章数量最高，占比 {person_counts.iloc[0] / total * 100:.1f}%。若协力人员占比较高，应重点审视准入培训、作业交底、甲方监护和合同考核闭环。"
+        add_paragraph(p_pers)
+    if not source_counts.empty:
+        p_src = f"数据来源中，{source_counts.index[0]} 占比最高。若行为观察/视频回看占比较高，说明技术监督有效，但也反映现场管理者事中制止不足，需提升现场巡查质量。"
+        add_paragraph(p_src)
+        
+    add_image(person_path, width_in=4.5)
+    add_image(source_path, width_in=4.5)
+    
+    add_heading_1("四、管理体系短板与根因诊断")
+    for i, cause in enumerate(root_causes, 1):
+        p = doc.add_paragraph()
+        p.paragraph_format.left_indent = Inches(0.25)
+        p.paragraph_format.space_after = Pt(4)
+        run = p.add_run(f"{i}. {cause}")
+        set_run_font(run, font_name="微软雅黑", size_pt=10.5)
+        
+    add_heading_1("五、改进建议与行动清单")
+    action_data = []
+    for action in actions:
+        action_data.append([
+            action.get('measure', ''),
+            action.get('detail', ''),
+            action.get('owner', ''),
+            action.get('metric', '')
+        ])
+    add_docx_table(doc, ["措施", "主要做法", "责任主体", "验证指标"], action_data, col_widths=[1.5, 2.5, 1.0, 1.0])
+    
+    add_heading_1("六、附录：数据字段与口径提示")
+    add_paragraph("本报告由 Excel 字段自动统计生成。若源数据含有更细的责任链条、连带记分、隐患编号或整改闭环字段，可进一步扩展为责任追溯、隐患闭环率和整改有效性分析。")
+    
+    doc.save(docx_path)
+
+
+def build_pdf(pdf_path: Path, title: str, period: str, total: int, score_total: float, a_count: int, high_ratio: float, 
+              level_counts: pd.Series, topic_counts: pd.Series, area_counts: pd.Series, person_counts: pd.Series, source_counts: pd.Series,
+              root_causes: list[str], actions: list[dict], 
+              trend_path: Path, level_path: Path, topic_path: Path, area_path: Path, person_path: Path, source_path: Path) -> None:
+    from matplotlib import font_manager
+    
+    class SafetyReportPDF(FPDF):
+        def header(self):
+            if self.page_no() > 1:
+                self.set_font("SimHei", size=9)
+                self.set_text_color(128, 128, 128)
+                self.cell(0, 10, "安全生产违章情况深度分析与改进建议报告", border="B", align="L")
+                self.ln(10)
+                
+        def footer(self):
+            self.set_y(-15)
+            self.set_font("SimHei", size=9)
+            self.set_text_color(128, 128, 128)
+            self.cell(0, 10, f"第 {self.page_no()} 页 / {{nb}}", align="C")
+
+    try:
+        simhei_path = font_manager.findfont("SimHei")
+    except Exception:
+        simhei_path = "C:\\Windows\\Fonts\\simhei.ttf"
+        
+    pdf = SafetyReportPDF()
+    pdf.alias_nb_pages()
+    
+    pdf.add_font("SimHei", style="", fname=simhei_path)
+    pdf.add_font("SimHei", style="B", fname=simhei_path)
+    
+    pdf.add_page()
+    
+    pdf.set_font("SimHei", style="B", size=18)
+    pdf.set_text_color(27, 54, 93)
+    pdf.cell(0, 15, title, align="C", new_x="LMARGIN", new_y="NEXT")
+    pdf.ln(5)
+    
+    pdf.set_font("SimHei", size=9.5)
+    pdf.set_text_color(120, 120, 120)
+    pdf.cell(0, 5, f"报告日期：{pd.Timestamp.today().strftime('%Y年%m月%d日')}    |    数据周期：{period}", align="C", new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(0, 5, f"数据口径：有效违章记录 {total} 条，累计记分约 {score_total:.0f} 分，A类/重大违章 {a_count} 起（占比 {high_ratio:.1f}%）", align="C", new_x="LMARGIN", new_y="NEXT")
+    pdf.ln(10)
+    
+    def add_pdf_heading_1(text):
+        pdf.set_font("SimHei", style="B", size=13)
+        pdf.set_text_color(27, 54, 93)
+        pdf.ln(5)
+        pdf.cell(0, 10, text, new_x="LMARGIN", new_y="NEXT")
+        pdf.ln(2)
+        
+    def add_pdf_heading_2(text):
+        pdf.set_font("SimHei", style="B", size=11)
+        pdf.set_text_color(27, 54, 93)
+        pdf.cell(0, 8, text, new_x="LMARGIN", new_y="NEXT")
+        pdf.ln(1)
+        
+    def add_pdf_paragraph(text):
+        pdf.set_font("SimHei", size=10)
+        pdf.set_text_color(51, 51, 51)
+        pdf.multi_cell(0, 6, "    " + text, new_x="LMARGIN", new_y="NEXT")
+        pdf.ln(3)
+        
+    def add_pdf_image(img_path, w=140):
+        if img_path and img_path.exists():
+            x = (210 - w) / 2
+            pdf.image(str(img_path), x=x, w=w)
+            pdf.ln(5)
+
+    add_pdf_heading_1("一、总体概况与核心判断")
+    p_desc = (
+        f"本次分析共识别 {total} 条有效违章记录，累计记分约 {score_total:.0f} 分。A类或重大违章约 {a_count} 起，"
+        f"占比 {high_ratio:.1f}%。数据表明，安全风险不是单点偶发，而是在人员行为、现场执行、协力单位管理和作业许可链条中呈现重复发生特征。"
+    )
+    add_pdf_paragraph(p_desc)
+    if len(level_counts):
+        p_sub = f"从级别结构看，{level_counts.index[0]} 数量最高；从专题归类看，{topic_counts.index[0] if len(topic_counts) else '未知'} 是最突出的高频问题。建议把高频且高后果的专题纳入厂级专项治理。"
+        add_pdf_paragraph(p_sub)
+        
+    add_pdf_image(trend_path, w=145)
+    pdf.ln(2)
+    add_pdf_image(level_path, w=110)
+    
+    level_total = float(level_counts.sum()) or 1.0
+    level_headers = ["违章级别", "数量", "占比"]
+    with pdf.table(col_widths=(60, 40, 40), text_align="CENTER") as table:
+        row = table.row()
+        for h in level_headers:
+            row.cell(h)
+        for idx, val in level_counts.items():
+            row = table.row()
+            row.cell(str(idx))
+            row.cell(str(int(val)))
+            row.cell(f"{val / level_total * 100:.1f}%")
+            
+    pdf.ln(5)
+    add_pdf_heading_1("二、高频违章与重点区域画像")
+    p_topic_desc = (
+        f"TOP 专题显示，{topic_counts.index[0] if len(topic_counts) > 0 else '无'}、"
+        f"{topic_counts.index[1] if len(topic_counts) > 1 else '其他'} 等问题重复出现，通常对应制度执行弱化、"
+        f"班组日常纠偏不足和现场监督穿透力不足。"
+    )
+    add_pdf_paragraph(p_topic_desc)
+    
+    add_pdf_image(topic_path, w=145)
+    pdf.add_page()
+    add_pdf_image(area_path, w=145)
+    
+    add_pdf_heading_2("高频违章专题 TOP10")
+    topic_total = float(topic_counts.sum()) or 1.0
+    with pdf.table(col_widths=(70, 35, 35), text_align="CENTER") as table:
+        row = table.row()
+        for h in ["违章专题", "数量", "占比"]:
+            row.cell(h)
+        for idx, val in topic_counts.head(10).items():
+            row = table.row()
+            row.cell(str(idx))
+            row.cell(str(int(val)))
+            row.cell(f"{val / topic_total * 100:.1f}%")
+            
+    pdf.ln(5)
+    add_pdf_heading_2("重点区域/组织 TOP10")
+    area_total = float(area_counts.sum()) or 1.0
+    with pdf.table(col_widths=(70, 35, 35), text_align="CENTER") as table:
+        row = table.row()
+        for h in ["区域/组织", "数量", "占比"]:
+            row.cell(h)
+        for idx, val in area_counts.head(10).items():
+            row = table.row()
+            row.cell(str(idx))
+            row.cell(str(int(val)))
+            row.cell(f"{val / area_total * 100:.1f}%")
+            
+    pdf.add_page()
+    add_pdf_heading_1("三、人员性质、协力单位与数据来源分析")
+    if not person_counts.empty:
+        p_pers = f"人员性质分布显示，{person_counts.index[0]} 违章数量最高，占比 {person_counts.iloc[0] / total * 100:.1f}%。若协力人员占比较高，应重点审视准入培训、作业交底、甲方监护和合同考核闭环。"
+        add_pdf_paragraph(p_pers)
+    if not source_counts.empty:
+        p_src = f"数据来源中，{source_counts.index[0]} 占比最高。若行为观察/视频回看占比较高，说明技术监督有效，但也反映现场管理者事中制止不足，需提升现场巡查质量。"
+        add_pdf_paragraph(p_src)
+        
+    add_pdf_image(person_path, w=115)
+    add_pdf_image(source_path, w=115)
+    
+    add_pdf_heading_1("四、管理体系短板与根因诊断")
+    pdf.set_font("SimHei", size=10)
+    pdf.set_text_color(51, 51, 51)
+    for i, cause in enumerate(root_causes, 1):
+        pdf.multi_cell(0, 6, f"{i}. {cause}", new_x="LMARGIN", new_y="NEXT")
+        pdf.ln(1.5)
+        
+    pdf.ln(5)
+    add_pdf_heading_1("五、改进建议与行动清单")
+    with pdf.table(col_widths=(45, 85, 30, 30), text_align="LEFT") as table:
+        row = table.row()
+        for h in ["措施", "主要做法", "责任主体", "验证指标"]:
+            row.cell(h)
+        for action in actions:
+            row = table.row()
+            row.cell(action.get('measure', ''))
+            row.cell(action.get('detail', ''))
+            row.cell(action.get('owner', ''))
+            row.cell(action.get('metric', ''))
+            
+    pdf.ln(5)
+    add_pdf_heading_1("六、附录：数据字段与口径提示")
+    add_pdf_paragraph("本报告由 Excel 字段自动统计生成。若源数据含有更细的责任链条、连带记分、隐患编号或整改闭环字段，可进一步扩展为责任追溯、隐患闭环率和整改有效性分析。")
+    
+    pdf.output(str(pdf_path))
+
+
 def build_report(excel_path: Path, output_path: Path, title: str, dynamic_file: Path | None = None) -> Path:
     dynamic_data: dict = {}
     if dynamic_file and dynamic_file.exists():
@@ -291,6 +680,10 @@ def build_report(excel_path: Path, output_path: Path, title: str, dynamic_file: 
     lines: list[str] = [
         f"# {title}",
         "",
+        f"💡 **提示**：本分析已同步生成专业格式的报告文档，您可直接下载：",
+        f"- 📝 **[点击下载 Word 报告](./{output_path.name.replace('.md', '.docx')})**",
+        f"- 📄 **[点击下载 PDF 报告](./{output_path.name.replace('.md', '.pdf')})**",
+        "",
         f"- 报告日期：{pd.Timestamp.today().strftime('%Y年%m月%d日')}",
         f"- 数据周期：{period or f'{date_min} 至 {date_max}'}",
         f"- 数据口径：剔除“已删除”记录，共 {total} 条有效违章明细；如源文件为“不含连带”导出，则连带责任仅作定性参考。",
@@ -367,6 +760,68 @@ def build_report(excel_path: Path, output_path: Path, title: str, dynamic_file: 
     ])
 
     output_path.write_text("\n".join(lines), encoding="utf-8")
+
+    docx_path = output_path.with_suffix(".docx")
+    pdf_path = output_path.with_suffix(".pdf")
+
+    try:
+        build_docx(
+            docx_path=docx_path,
+            title=title,
+            period=period or f"{date_min} 至 {date_max}",
+            total=total,
+            score_total=score_total,
+            a_count=a_count,
+            high_ratio=high_ratio,
+            level_counts=level_counts,
+            topic_counts=topic_counts,
+            area_counts=area_counts,
+            person_counts=person_counts,
+            source_counts=source_counts,
+            root_causes=root_causes,
+            actions=actions,
+            trend_path=trend_path,
+            level_path=level_path,
+            topic_path=topic_path,
+            area_path=area_path,
+            person_path=person_path,
+            source_path=source_path
+        )
+        print(f"Word report successfully generated at: {docx_path}")
+    except Exception as e:
+        print(f"Error generating Word report: {e}")
+        import traceback
+        traceback.print_exc()
+
+    try:
+        build_pdf(
+            pdf_path=pdf_path,
+            title=title,
+            period=period or f"{date_min} 至 {date_max}",
+            total=total,
+            score_total=score_total,
+            a_count=a_count,
+            high_ratio=high_ratio,
+            level_counts=level_counts,
+            topic_counts=topic_counts,
+            area_counts=area_counts,
+            person_counts=person_counts,
+            source_counts=source_counts,
+            root_causes=root_causes,
+            actions=actions,
+            trend_path=trend_path,
+            level_path=level_path,
+            topic_path=topic_path,
+            area_path=area_path,
+            person_path=person_path,
+            source_path=source_path
+        )
+        print(f"PDF report successfully generated at: {pdf_path}")
+    except Exception as e:
+        print(f"Error generating PDF report: {e}")
+        import traceback
+        traceback.print_exc()
+
     return output_path
 
 
